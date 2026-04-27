@@ -234,10 +234,9 @@ def _make_triangle_landmark(
     tri_height: float = 0.5,
     color: float = 0.0,
     position: str = "right",
+    flip_vertical: bool = False,
 ) -> Landmark:
     """Create an equilateral triangle landmark on a wall.
-
-    The triangle points upward with its base at the bottom.
 
     Args:
         wall_index: Index of the wall.
@@ -247,6 +246,8 @@ def _make_triangle_landmark(
         color: Grayscale fill (0 = black, 1 = white).
         position: Horizontal placement — ``'left'``, ``'centre'``/``'center'``,
             or ``'right'``.
+        flip_vertical: If ``True``, the triangle points downward (base at top,
+            apex at bottom).
     """
     base = 2 * tri_height / math.sqrt(3)
     region_w = min(base, wall_u_extent)
@@ -259,11 +260,179 @@ def _make_triangle_landmark(
         position,
     )
 
+    _flip = flip_vertical
+
     def shape_fn(u: np.ndarray, v: np.ndarray):
-        # Equilateral triangle: base at bottom (v=0), apex at top (v=1)
-        inside = (u >= 0.5 * v) & (u <= 1.0 - 0.5 * v)
+        if _flip:
+            # Base at top (v=1), apex at bottom (v=0)
+            inside = (u >= 0.5 - 0.5 * v) & (u <= 0.5 + 0.5 * v)
+        else:
+            # Base at bottom (v=0), apex at top (v=1)
+            inside = (u >= 0.5 * v) & (u <= 1.0 - 0.5 * v)
         c = np.full_like(u, color)
         a = inside.astype(np.float64)
+        return c, a
+
+    return Landmark(
+        wall_index=wall_index, uv_min=uv_min, uv_max=uv_max, shape_fn=shape_fn
+    )
+
+
+def _make_solid_circle_landmark(
+    wall_index: int,
+    wall_u_extent: float,
+    wall_v_extent: float,
+    diameter: float = 0.4,
+    color: float = 0.0,
+    position: str = "centre",
+) -> Landmark:
+    """Create a solid filled circle landmark on a wall.
+
+    Args:
+        wall_index: Index of the wall.
+        wall_u_extent: Physical width of the wall along its u-axis (metres).
+        wall_v_extent: Physical height of the wall (metres).
+        diameter: Diameter of the circle (metres).
+        color: Grayscale fill (0 = black, 1 = white).
+        position: Horizontal placement — ``'left'``, ``'centre'``/``'center'``,
+            or ``'right'``.
+    """
+    region_w = min(diameter, wall_u_extent)
+    region_h = min(diameter, wall_v_extent)
+    uv_min, uv_max = _compute_uv_region(
+        region_w, region_h, wall_u_extent, wall_v_extent, position
+    )
+    outer_r = diameter / 2
+
+    def shape_fn(u: np.ndarray, v: np.ndarray):
+        x = (u - 0.5) * region_w
+        y = (v - 0.5) * region_h
+        filled = np.sqrt(x**2 + y**2) <= outer_r
+        c = np.full_like(u, color)
+        a = filled.astype(np.float64)
+        return c, a
+
+    return Landmark(
+        wall_index=wall_index, uv_min=uv_min, uv_max=uv_max, shape_fn=shape_fn
+    )
+
+
+def _make_flipped_grating_landmark(
+    wall_index: int,
+    wall_u_extent: float,
+    wall_v_extent: float,
+    rect_width: float = 0.4,
+    rect_height: float = 0.3,
+    stripe_width: float = 0.1,
+    position: str = "centre",
+) -> Landmark:
+    """Create a rectangle with horizontally-flipped 45° diagonal stripes.
+
+    The stripes run in the opposite diagonal direction compared to
+    :func:`_make_striped_rect_landmark` (i.e. mirrored along the vertical axis).
+
+    Args:
+        wall_index: Index of the wall.
+        wall_u_extent: Physical width of the wall along its u-axis (metres).
+        wall_v_extent: Physical height of the wall (metres).
+        rect_width: Width of the rectangle (metres).
+        rect_height: Height of the rectangle (metres).
+        stripe_width: Perpendicular width of each stripe (metres).
+        position: Horizontal placement — ``'left'``, ``'centre'``/``'center'``,
+            or ``'right'``.
+    """
+    region_w = min(rect_width, wall_u_extent)
+    region_h = min(rect_height, wall_v_extent)
+    uv_min, uv_max = _compute_uv_region(
+        region_w, region_h, wall_u_extent, wall_v_extent, position
+    )
+
+    def shape_fn(u: np.ndarray, v: np.ndarray):
+        x = u * region_w
+        y = v * region_h
+        # Mirror along horizontal: use (−x + y) instead of (x + y)
+        d = (-x + y) / math.sqrt(2)
+        stripe_idx = np.floor(d / stripe_width).astype(int) % 2
+        c = np.where(stripe_idx == 0, 0.0, 1.0)
+        a = np.ones_like(u)
+        return c, a
+
+    return Landmark(
+        wall_index=wall_index, uv_min=uv_min, uv_max=uv_max, shape_fn=shape_fn
+    )
+
+
+def _make_vertical_stripes_landmark(
+    wall_index: int,
+    wall_u_extent: float,
+    wall_v_extent: float,
+    rect_width: float = 0.4,
+    rect_height: float = 0.3,
+    stripe_width: float = 0.05,
+    position: str = "centre",
+) -> Landmark:
+    """Create a rectangle filled with alternating black-and-white vertical stripes.
+
+    Args:
+        wall_index: Index of the wall.
+        wall_u_extent: Physical width of the wall along its u-axis (metres).
+        wall_v_extent: Physical height of the wall (metres).
+        rect_width: Width of the rectangle (metres).
+        rect_height: Height of the rectangle (metres).
+        stripe_width: Width of each stripe (metres).
+        position: Horizontal placement — ``'left'``, ``'centre'``/``'center'``,
+            or ``'right'``.
+    """
+    region_w = min(rect_width, wall_u_extent)
+    region_h = min(rect_height, wall_v_extent)
+    uv_min, uv_max = _compute_uv_region(
+        region_w, region_h, wall_u_extent, wall_v_extent, position
+    )
+
+    def shape_fn(u: np.ndarray, v: np.ndarray):
+        x = u * region_w
+        stripe_idx = np.floor(x / stripe_width).astype(int) % 2
+        c = np.where(stripe_idx == 0, 0.0, 1.0)
+        a = np.ones_like(u)
+        return c, a
+
+    return Landmark(
+        wall_index=wall_index, uv_min=uv_min, uv_max=uv_max, shape_fn=shape_fn
+    )
+
+
+def _make_horizontal_stripes_landmark(
+    wall_index: int,
+    wall_u_extent: float,
+    wall_v_extent: float,
+    rect_width: float = 0.4,
+    rect_height: float = 0.3,
+    stripe_width: float = 0.05,
+    position: str = "centre",
+) -> Landmark:
+    """Create a rectangle filled with alternating black-and-white horizontal stripes.
+
+    Args:
+        wall_index: Index of the wall.
+        wall_u_extent: Physical width of the wall along its u-axis (metres).
+        wall_v_extent: Physical height of the wall (metres).
+        rect_width: Width of the rectangle (metres).
+        rect_height: Height of the rectangle (metres).
+        stripe_width: Height of each stripe (metres).
+        position: Horizontal placement — ``'left'``, ``'centre'``/``'center'``,
+            or ``'right'``.
+    """
+    region_w = min(rect_width, wall_u_extent)
+    region_h = min(rect_height, wall_v_extent)
+    uv_min, uv_max = _compute_uv_region(
+        region_w, region_h, wall_u_extent, wall_v_extent, position
+    )
+
+    def shape_fn(u: np.ndarray, v: np.ndarray):
+        y = v * region_h
+        stripe_idx = np.floor(y / stripe_width).astype(int) % 2
+        c = np.where(stripe_idx == 0, 0.0, 1.0)
+        a = np.ones_like(u)
         return c, a
 
     return Landmark(

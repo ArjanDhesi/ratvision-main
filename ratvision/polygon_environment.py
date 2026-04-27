@@ -24,6 +24,10 @@ from .box_environment import (
     _make_circle_ring_landmark,
     _make_triangle_landmark,
     _make_striped_rect_landmark,
+    _make_solid_circle_landmark,
+    _make_flipped_grating_landmark,
+    _make_vertical_stripes_landmark,
+    _make_horizontal_stripes_landmark,
 )
 
 
@@ -200,6 +204,8 @@ class PolygonEnvironment:
 def default_polygon_environment(
     vertices: List[List[float]],
     height: float = 0.5,
+    n_landmarks: Optional[int] = None,
+    rng: Optional[np.random.Generator] = None,
 ) -> PolygonEnvironment:
     """Create a polygon environment with real textures and landmarks.
 
@@ -213,6 +219,13 @@ def default_polygon_environment(
             counter-clockwise order, as produced by
             ``polygon_gen.generate_polygon()``.
         height: Wall height in metres (default 0.5).
+        n_landmarks: Number of unique landmark types to use.  Must be between
+            1 and 10.  When ``None`` (default) all 10 landmark types are used.
+            The selected types are drawn without replacement from the full
+            pool and then cycled across walls.
+        rng: Optional :class:`numpy.random.Generator` for reproducible
+            landmark selection.  When ``None`` a fresh default generator is
+            used.
 
     Returns:
         A fully configured :class:`PolygonEnvironment`.
@@ -222,14 +235,27 @@ def default_polygon_environment(
 
     env_dir = files("ratvision.environments")
 
-    # -- wall textures (cycled if n > 4) ------------------------------------
-    wall_files = [
+    # -- wall textures --------------------------------------------------------
+    base_wall_files = [
         "wall_concrete1_635x500.png",  # texture 0
         "wall_texture_635x500.png",    # texture 1
         "wall_concrete2_635x500.png",  # texture 2
         "wall_concrete3_635x500.png",  # texture 3
     ]
-    base_textures = [_load_texture(env_dir.joinpath(f)) for f in wall_files]
+    extra_wall_files = [
+        "new_wall_texture1.jpg",       # texture 4
+        "new_wall_texture2.jpg",       # texture 5
+        "new_wall_texture3.jpg",       # texture 6
+        "new_wall_texture4.jpg",       # texture 7
+        "new_wall_texture5.jpg",       # texture 8
+        "new_wall_texture6.jpg",       # texture 9
+    ]
+    if n > 4:
+        # Use all 10 textures so walls don't repeat (supports up to 10 sides)
+        all_wall_files = base_wall_files + extra_wall_files
+    else:
+        all_wall_files = base_wall_files
+    base_textures = [_load_texture(env_dir.joinpath(f)) for f in all_wall_files]
     wall_textures = [base_textures[i % len(base_textures)] for i in range(n)]
 
     # -- floor texture ------------------------------------------------------
@@ -242,8 +268,8 @@ def default_polygon_environment(
         p1 = np.array(verts[(i + 1) % n])
         edge_lengths.append(float(np.linalg.norm(p1 - p0)))
 
-    # -- landmarks (cycled if n > 3) ----------------------------------------
-    # Define landmark factories; each takes (wall_index, wall_width, wall_height)
+    # -- landmarks (cycled if n > available types) ---------------------------
+    # Each factory takes (wall_index, wall_width, wall_height)
     def _landmark_striped_rect(wall_index, wall_w, wall_h):
         return _make_striped_rect_landmark(
             wall_index=wall_index,
@@ -264,7 +290,7 @@ def default_polygon_environment(
             color=1.0,
         )
 
-    def _landmark_triangle(wall_index, wall_w, wall_h):
+    def _landmark_black_triangle(wall_index, wall_w, wall_h):
         return _make_triangle_landmark(
             wall_index=wall_index,
             wall_u_extent=wall_w,
@@ -274,16 +300,116 @@ def default_polygon_environment(
             position="left",
         )
 
-    landmark_factories = [
+    def _landmark_white_triangle(wall_index, wall_w, wall_h):
+        return _make_triangle_landmark(
+            wall_index=wall_index,
+            wall_u_extent=wall_w,
+            wall_v_extent=wall_h,
+            tri_height=min(0.4, wall_h * 0.8),
+            color=1.0,
+            position="centre",
+        )
+
+    def _landmark_inverted_black_triangle(wall_index, wall_w, wall_h):
+        return _make_triangle_landmark(
+            wall_index=wall_index,
+            wall_u_extent=wall_w,
+            wall_v_extent=wall_h,
+            tri_height=min(0.4, wall_h * 0.8),
+            color=0.0,
+            position="right",
+            flip_vertical=True,
+        )
+
+    def _landmark_inverted_white_triangle(wall_index, wall_w, wall_h):
+        return _make_triangle_landmark(
+            wall_index=wall_index,
+            wall_u_extent=wall_w,
+            wall_v_extent=wall_h,
+            tri_height=min(0.4, wall_h * 0.8),
+            color=1.0,
+            position="centre",
+            flip_vertical=True,
+        )
+
+    def _landmark_black_circle(wall_index, wall_w, wall_h):
+        return _make_solid_circle_landmark(
+            wall_index=wall_index,
+            wall_u_extent=wall_w,
+            wall_v_extent=wall_h,
+            diameter=min(0.4, wall_w * 0.8, wall_h * 0.8),
+            color=0.0,
+        )
+
+    def _landmark_flipped_grating(wall_index, wall_w, wall_h):
+        return _make_flipped_grating_landmark(
+            wall_index=wall_index,
+            wall_u_extent=wall_w,
+            wall_v_extent=wall_h,
+            rect_width=min(0.4, wall_w * 0.8),
+            rect_height=min(0.3, wall_h * 0.8),
+            stripe_width=0.1,
+        )
+
+    def _landmark_vertical_stripes(wall_index, wall_w, wall_h):
+        return _make_vertical_stripes_landmark(
+            wall_index=wall_index,
+            wall_u_extent=wall_w,
+            wall_v_extent=wall_h,
+            rect_width=min(0.4, wall_w * 0.8),
+            rect_height=min(0.3, wall_h * 0.8),
+            stripe_width=0.05,
+        )
+
+    def _landmark_horizontal_stripes(wall_index, wall_w, wall_h):
+        return _make_horizontal_stripes_landmark(
+            wall_index=wall_index,
+            wall_u_extent=wall_w,
+            wall_v_extent=wall_h,
+            rect_width=min(0.4, wall_w * 0.8),
+            rect_height=min(0.3, wall_h * 0.8),
+            stripe_width=0.05,
+        )
+
+    all_landmark_factories = [
         _landmark_striped_rect,
         _landmark_circle_ring,
-        _landmark_triangle,
+        _landmark_black_triangle,
+        _landmark_white_triangle,
+        _landmark_inverted_black_triangle,
+        _landmark_inverted_white_triangle,
+        _landmark_black_circle,
+        _landmark_flipped_grating,
+        _landmark_vertical_stripes,
+        _landmark_horizontal_stripes,
     ]
 
+    _rng = rng if rng is not None else np.random.default_rng()
+
+    if n_landmarks is not None:
+        if not (0 <= n_landmarks <= len(all_landmark_factories)):
+            raise ValueError(
+                f"n_landmarks must be between 0 and {len(all_landmark_factories)}, "
+                f"got {n_landmarks}"
+            )
+        if n_landmarks == 0:
+            landmark_factories = []
+        else:
+            # choose without replacement; _rng.choice already returns in random order
+            indices = _rng.choice(len(all_landmark_factories), size=n_landmarks, replace=False)
+            landmark_factories = [all_landmark_factories[i] for i in indices]
+    else:
+        landmark_factories = list(all_landmark_factories)
+        _rng.shuffle(landmark_factories)
+
+    # Randomly assign each chosen landmark type to a distinct wall.
+    # Walls beyond the number of landmark types receive no landmark.
     landmarks = []
-    for i in range(n):
-        factory = landmark_factories[i % len(landmark_factories)]
-        landmarks.append(factory(i, edge_lengths[i], height))
+    if landmark_factories:
+        wall_order = _rng.permutation(n)
+        for rank, factory in enumerate(landmark_factories):
+            wall_idx = wall_order[rank]
+            landmarks.append(factory(wall_idx, edge_lengths[wall_idx], height))
 
     return PolygonEnvironment(
         vertices=verts,
