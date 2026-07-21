@@ -4,8 +4,9 @@ This module defines the :class:`PolygonEnvironment` dataclass that describes
 an environment whose floor plan is an arbitrary convex, concave, or irregular
 polygon with 3–10 vertices.  Each edge of the polygon becomes a vertical wall.
 
-Wall and landmark textures are cycled (wrapped with modulo) when the number
-of polygon edges exceeds the number of provided textures or landmarks.
+Each wall is assigned a unique wall texture chosen at random from the
+available textures, and the floor texture is selected at random per
+environment.
 
 The environment can be consumed by raycasting and torch renderers that
 support polygon wall planes (see :meth:`PolygonEnvironment.wall_planes`).
@@ -210,9 +211,11 @@ def default_polygon_environment(
     """Create a polygon environment with real textures and landmarks.
 
     Wall textures, floor texture, and landmarks are taken from the
-    ``ratvision.environments`` package data directory.  When the polygon has
-    more than 4 edges, textures and landmarks are cycled with modulo
-    indexing.
+    ``ratvision.environments`` package data directory.  Each wall receives a
+    unique wall texture drawn at random (without replacement) from the 10
+    available textures, and the floor texture is chosen at random per
+    environment.  Landmark types are also drawn without replacement and each
+    is placed on a distinct wall.
 
     Args:
         vertices: 2-D polygon vertices as ``[[x0, y0], [x1, y1], …]`` in
@@ -220,9 +223,10 @@ def default_polygon_environment(
             ``polygon_gen.generate_polygon()``.
         height: Wall height in metres (default 0.5).
         n_landmarks: Number of unique landmark types to use.  Must be between
-            1 and 10.  When ``None`` (default) all 10 landmark types are used.
+            0 and 10.  When ``None`` (default) all 10 landmark types are used.
             The selected types are drawn without replacement from the full
-            pool and then cycled across walls.
+            pool and each is placed on a distinct wall.  Since there is at most
+            one landmark per wall, the count is capped at the number of walls.
         rng: Optional :class:`numpy.random.Generator` for reproducible
             landmark selection.  When ``None`` a fresh default generator is
             used.
@@ -235,14 +239,16 @@ def default_polygon_environment(
 
     env_dir = files("ratvision.environments")
 
+    _rng = rng if rng is not None else np.random.default_rng()
+
     # -- wall textures --------------------------------------------------------
-    base_wall_files = [
+    # 10 available wall textures; each wall gets a unique one chosen at random
+    # (without replacement). Supports up to 10 sides.
+    all_wall_files = [
         "wall_concrete1_635x500.png",  # texture 0
         "wall_texture_635x500.png",    # texture 1
         "wall_concrete2_635x500.png",  # texture 2
         "wall_concrete3_635x500.png",  # texture 3
-    ]
-    extra_wall_files = [
         "new_wall_texture1.jpg",       # texture 4
         "new_wall_texture2.jpg",       # texture 5
         "new_wall_texture3.jpg",       # texture 6
@@ -250,16 +256,17 @@ def default_polygon_environment(
         "new_wall_texture5.jpg",       # texture 8
         "new_wall_texture6.jpg",       # texture 9
     ]
-    if n > 4:
-        # Use all 10 textures so walls don't repeat (supports up to 10 sides)
-        all_wall_files = base_wall_files + extra_wall_files
-    else:
-        all_wall_files = base_wall_files
-    base_textures = [_load_texture(env_dir.joinpath(f)) for f in all_wall_files]
-    wall_textures = [base_textures[i % len(base_textures)] for i in range(n)]
+    wall_indices = _rng.choice(len(all_wall_files), size=n, replace=False)
+    wall_textures = [_load_texture(env_dir.joinpath(all_wall_files[i])) for i in wall_indices]
 
     # -- floor texture ------------------------------------------------------
-    floor_texture = _load_texture(env_dir.joinpath("floor_texture_635x635.png"))
+    # Pick one floor texture at random per environment.
+    floor_files = [
+        "floor_texture_635x635.png",
+        "plain_floor_texture.jpg",
+        "wood_floor.jpg",
+    ]
+    floor_texture = _load_texture(env_dir.joinpath(floor_files[_rng.integers(len(floor_files))]))
 
     # -- compute edge lengths for landmark sizing ---------------------------
     edge_lengths = []
@@ -384,23 +391,26 @@ def default_polygon_environment(
         _landmark_horizontal_stripes,
     ]
 
-    _rng = rng if rng is not None else np.random.default_rng()
-
     if n_landmarks is not None:
         if not (0 <= n_landmarks <= len(all_landmark_factories)):
             raise ValueError(
                 f"n_landmarks must be between 0 and {len(all_landmark_factories)}, "
                 f"got {n_landmarks}"
             )
-        if n_landmarks == 0:
-            landmark_factories = []
-        else:
-            # choose without replacement; _rng.choice already returns in random order
-            indices = _rng.choice(len(all_landmark_factories), size=n_landmarks, replace=False)
-            landmark_factories = [all_landmark_factories[i] for i in indices]
+        n_types = n_landmarks
     else:
-        landmark_factories = list(all_landmark_factories)
-        _rng.shuffle(landmark_factories)
+        n_types = len(all_landmark_factories)
+
+    # Each landmark type is placed on a distinct wall, so at most one landmark
+    # per wall: cap the number of types at the number of walls.
+    n_types = min(n_types, n)
+
+    if n_types == 0:
+        landmark_factories = []
+    else:
+        # choose without replacement; _rng.choice already returns in random order
+        indices = _rng.choice(len(all_landmark_factories), size=n_types, replace=False)
+        landmark_factories = [all_landmark_factories[i] for i in indices]
 
     # Randomly assign each chosen landmark type to a distinct wall.
     # Walls beyond the number of landmark types receive no landmark.
