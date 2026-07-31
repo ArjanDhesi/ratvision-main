@@ -262,9 +262,10 @@ def default_polygon_environment(
     # -- floor texture ------------------------------------------------------
     # Pick one floor texture at random per environment.
     floor_files = [
-        "floor_texture_635x635.png",
-        "plain_floor_texture.jpg",
-        "wood_floor.jpg",
+        "bark.png",
+        "logs.png",
+        "leaves.png",
+        "grass.png",
     ]
     floor_texture = _load_texture(env_dir.joinpath(floor_files[_rng.integers(len(floor_files))]))
 
